@@ -1,0 +1,3 @@
+[workspace]
+members = [ "examples/internal-testing","webcontr", "webcontr-macros"]
+resolver = "2"

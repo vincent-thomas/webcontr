@@ -1,0 +1,4 @@
+[toolchain]
+components = ["clippy"]
+channel = "nightly"
+profile = "minimal"

@@ -1,0 +1,12 @@
+
+[package]
+name = "webcontr"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = "0.1.85"
+futures-util = { version = "0.3.31", features = ["sink"] }
+serde = { version = "1.0.217", features = ["derive"] }
+tokio = { version = "1.43.0", features = ["net", "sync"] }
+webcontr-macros = { path = "../webcontr-macros" }
