@@ -32,13 +32,6 @@ impl<Item, SinkItem> Stream for UnboundedChannel<Item, SinkItem> {
     }
   }
 
-  //fn poll_next(
-  //  mut self: std::pin::Pin<&mut Self>,
-  //  cx: &mut std::task::Context<'_>,
-  //) -> Poll<Option<Self::Item>> {
-  //  self.receiver.poll_recv(cx)
-  //}
-
   fn size_hint(&self) -> (usize, Option<usize>) {
     (0, None)
   }

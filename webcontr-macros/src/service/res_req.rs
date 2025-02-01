@@ -1,16 +1,22 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{quote, ToTokens};
-use syn::{Ident, PatType, ReturnType};
+use syn::{Ident, PatType, ReturnType, Visibility};
 
 #[derive(Debug, Clone)]
 pub struct ServiceResponse {
+  vis: Visibility,
   pub ident: Ident,
   rpcs: Vec<(Ident, ReturnType)>,
 }
 
 impl ServiceResponse {
-  pub fn new(name: Ident, rpcs: Vec<(Ident, ReturnType)>) -> Self {
+  pub fn new(
+    vis: Visibility,
+    name: Ident,
+    rpcs: Vec<(Ident, ReturnType)>,
+  ) -> Self {
     Self {
+      vis,
       ident: Ident::new(&format!("{}Response", name.to_string()), name.span()),
       rpcs,
     }
@@ -19,7 +25,7 @@ impl ServiceResponse {
 
 impl ToTokens for ServiceResponse {
   fn to_tokens(&self, tokens: &mut TokenStream2) {
-    let Self { ident, rpcs } = self;
+    let Self { vis, ident, rpcs } = self;
     let keys = rpcs.iter().map(|(ident, return_type)| {
       let output = match return_type {
         ReturnType::Default => quote! {()},
@@ -34,8 +40,10 @@ impl ToTokens for ServiceResponse {
     });
 
     tokens.extend(quote! {
-        #[derive(Debug)]
-        enum #ident {
+        #[allow(no_docs)]
+        #[derive(Debug, webcontr::prelude::serde::Deserialize, webcontr::prelude::serde::Serialize)]
+        #[serde(crate = "::webcontr::prelude::serde")]
+        #vis enum #ident {
             #(#keys),*
         }
     })
@@ -46,10 +54,16 @@ impl ToTokens for ServiceResponse {
 pub struct ServiceRequest {
   pub ident: Ident,
   pub args: Vec<(Ident, Vec<PatType>)>,
+  pub vis: Visibility,
 }
 impl ServiceRequest {
-  pub fn new(name: Ident, args: Vec<(Ident, Vec<PatType>)>) -> Self {
+  pub fn new(
+    vis: Visibility,
+    name: Ident,
+    args: Vec<(Ident, Vec<PatType>)>,
+  ) -> Self {
     Self {
+      vis,
       ident: Ident::new(&format!("{}Request", name.to_string()), name.span()),
       args,
     }
@@ -58,7 +72,7 @@ impl ServiceRequest {
 
 impl ToTokens for ServiceRequest {
   fn to_tokens(&self, tokens: &mut TokenStream2) {
-    let Self { ident, args } = self;
+    let Self { vis, ident, args } = self;
     let keys = args.iter().map(|(ident, values)| {
       let values_iter = values.iter().map(|_type| {
         let key = _type.pat.clone();
@@ -77,7 +91,10 @@ impl ToTokens for ServiceRequest {
     });
 
     tokens.extend(quote! {
-        enum #ident {
+        #[allow(no_docs)]
+        #[derive(Debug, webcontr::prelude::serde::Deserialize, webcontr::prelude::serde::Serialize)]
+        #[serde(crate = "::webcontr::prelude::serde")]
+        #vis enum #ident {
             #(#keys),*
         }
     })

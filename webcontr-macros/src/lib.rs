@@ -84,11 +84,7 @@ impl Parse for Rpc {
 pub fn service(_: TokenStream, input: TokenStream) -> TokenStream {
   let input = parse_macro_input!(input as Service);
 
-  impl_service(input).into()
-}
-
-fn impl_service(input: Service) -> TokenStream2 {
-  ServiceGenerator::new(input).into_token_stream()
+  ServiceGenerator::new(input).into_token_stream().into()
 }
 
 struct ServiceGenerator {
@@ -112,8 +108,16 @@ impl ServiceGenerator {
       .collect();
 
     ServiceGenerator {
-      service_request: ServiceRequest::new(service.ident.clone(), req_args),
-      service_response: ServiceResponse::new(service.ident.clone(), res_args),
+      service_request: ServiceRequest::new(
+        service.vis.clone(),
+        service.ident.clone(),
+        req_args,
+      ),
+      service_response: ServiceResponse::new(
+        service.vis.clone(),
+        service.ident.clone(),
+        res_args,
+      ),
       service,
     }
   }
@@ -177,7 +181,7 @@ impl ServiceGenerator {
       self.service.ident.span(),
     );
     quote! {
-        struct #serve_struct_ident<S> {
+        #vis struct #serve_struct_ident<S> {
             service: S
         }
 
@@ -196,12 +200,6 @@ impl ServiceGenerator {
     }
   }
 
-  fn service_response(&self) -> TokenStream2 {
-    self.service_response.to_token_stream()
-  }
-  fn service_request(&self) -> TokenStream2 {
-    self.service_request.to_token_stream()
-  }
   fn service_client(&self) -> TokenStream2 {
     let ident = Ident::new(
       &format!("{}Client", self.service.ident.to_string()),
@@ -245,10 +243,10 @@ impl ServiceGenerator {
             #(
                 pub async fn #rpc_ident(&mut self, #(#rpc_args_types),*) -> Result<#rpc_return_type, ()> {
                     let req = #rpc_req_ident::#rpc_ident { #(#rpc_args),* };
-                    self.transport.feed(req).await;
-                    self.transport.flush().await;
+                    webcontr::prelude::SinkExt::feed(&mut self.transport, req).await;
+                    webcontr::prelude::SinkExt::flush(&mut self.transport).await;
 
-                    let response = match self.transport.next().await {
+                    let response = match webcontr::prelude::StreamExt::next(&mut self.transport).await {
                         Some(payload) => match payload.map_err(|_| ())? {
                             #rpc_res_ident::#rpc_ident(response) => response,
                             _ => unreachable!()
@@ -260,34 +258,6 @@ impl ServiceGenerator {
             )*
         }
     }
-    //impl<T> PingClient<T>
-    //where
-    //  T: Transport<PingCommandResponse, PingCommandRequest> + Unpin,
-    //{
-    //  fn new(transport: T) -> Self {
-    //    Self { transport }
-    //  }
-    //
-    //  pub async fn ping(
-    //    &mut self,
-    //    value: String,
-    //    value1: String,
-    //  ) -> Result<String, ()> {
-    //    let req = PingCommandRequest::ping { value, value1 };
-    //    self.transport.feed(req).await;
-    //    self.transport.flush().await;
-    //
-    //    let response = match self.transport.next().await {
-    //      Some(payload) => match payload.map_err(|_| ())? {
-    //        PingCommandResponse::ping(response) => response,
-    //        _ => unreachable!(),
-    //      },
-    //      None => return Err(()),
-    //    };
-    //
-    //    Ok(response)
-    //  }
-    //}
   }
 }
 
@@ -296,8 +266,8 @@ impl ToTokens for ServiceGenerator {
     tokens.extend([
       self.trait_service(),
       self.serve_fn(),
-      self.service_request(),
-      self.service_response(),
+      self.service_response.to_token_stream(),
+      self.service_request.to_token_stream(),
       self.service_client(),
     ]);
   }
