@@ -1,7 +1,5 @@
 mod service;
 
-use std::{iter::Map, slice::Iter};
-
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, ToTokens};
@@ -10,8 +8,8 @@ use service::{
   Service,
 };
 use syn::{
-  braced, parenthesized, parse::Parse, parse_macro_input, spanned::Spanned,
-  Attribute, FnArg, Ident, Pat, PatType, ReturnType, Token, Visibility,
+  parenthesized, parse::Parse, parse_macro_input, spanned::Spanned, Attribute,
+  FnArg, Ident, Pat, PatType, ReturnType, Token,
 };
 
 #[derive(Debug)]
@@ -127,19 +125,6 @@ impl ServiceGenerator {
     let rpcs_iter = rpcs.iter();
     let attrs_iter = attrs.iter();
 
-    let rpcs_args: Vec<Vec<&Pat>> = rpcs_iter
-      .clone()
-      .map(|rpc| rpc.args.iter().map(|arg| &*arg.pat).collect::<Vec<&Pat>>())
-      .collect();
-
-    let req_ident = &self.service_request.ident;
-    let res_ident = &self.service_response.ident;
-
-    // Same as function names
-    let req_variants =
-      self.service_request.args.iter().map(|variant| variant.0.clone());
-    let res_ident = &self.service_response.ident;
-
     let serve_struct_ident = Ident::new(
       &format!("{}Serve", self.service.ident.to_string()),
       self.service.ident.span(),
@@ -147,11 +132,10 @@ impl ServiceGenerator {
 
     quote! {
        #(#attrs_iter),*
+       #[webcontr::async_trait]
        #vis trait #ident: Sized {
            #(#rpcs_iter)*
-           fn service_name() -> &'static str {
-               stringify!(#ident)
-           }
+
            fn into_serve(self) -> #serve_struct_ident<Self> {
                #serve_struct_ident {
                    service: self
@@ -160,8 +144,8 @@ impl ServiceGenerator {
        }
     }
   }
-  fn serve_fn(&self) -> TokenStream2 {
-    let Service { attrs, vis, ident, rpcs } = &self.service;
+  fn impl_serve_fn(&self) -> TokenStream2 {
+    let Service { attrs: _, vis, ident, rpcs } = &self.service;
 
     let rpcs_args: Vec<Vec<&Pat>> = rpcs
       .iter()
@@ -185,13 +169,16 @@ impl ServiceGenerator {
             service: S
         }
 
-        impl<A: #ident> webcontr::Serve<#req_ident, #res_ident> for #serve_struct_ident<A> {
-           async fn serve(&self, req: #req_ident) -> #res_ident {
+        #[webcontr::async_trait]
+        impl<A: #ident + Send + Sync> webcontr::Serve for #serve_struct_ident<A> {
+           async fn serve(&self, req: webcontr::prelude::Bytes) -> Result<webcontr::prelude::Bytes, webcontr::ServeError> {
+               let req: #req_ident = webcontr::prelude::bincode::deserialize(&req).map_err(|_| webcontr::ServeError::InvalidRequest)?;
                match req {
                    #(
                     #req_ident::#variants { #(#rpcs_args),* } => {
                         let out = #ident::#variants(&self.service, #(#rpcs_args),*).await;
-                        #res_ident::#variants(out)
+                        let bytes = webcontr::prelude::bincode::serialize(&#res_ident::#variants(out)).unwrap();
+                        Ok(webcontr::prelude::Bytes::from(bytes))
                     }
                     ),*
                }
@@ -200,8 +187,25 @@ impl ServiceGenerator {
     }
   }
 
+  fn impl_servicename_fn(&self) -> TokenStream2 {
+    let ident = &self.service.ident;
+    let serve_struct_ident = Ident::new(
+      &format!("{}Serve", self.service.ident.to_string()),
+      self.service.ident.span(),
+    );
+
+    quote! {
+        impl<B> webcontr::ServiceName for #serve_struct_ident<B> {
+            fn name(&self) -> &'static str {
+                stringify!(#ident)
+            }
+        }
+    }
+  }
+
   fn service_client(&self) -> TokenStream2 {
-    let ident = Ident::new(
+    let ident = &self.service.ident;
+    let client_ident = Ident::new(
       &format!("{}Client", self.service.ident.to_string()),
       self.service.ident.span(),
     );
@@ -231,43 +235,93 @@ impl ServiceGenerator {
     let rpc_req_ident = &self.service_request.ident;
 
     quote! {
-        pub struct #ident<T> {
-            transport: T
-        }
+          pub struct #client_ident {
+              addr: String
+          }
 
-        impl<T> #ident<T> where T: webcontr::transport::Transport<#rpc_res_ident, #rpc_req_ident> + Unpin {
-            pub fn new(transport: T) -> Self {
-                Self { transport }
-            }
+          impl #client_ident {
+              pub fn new(addr: String) -> Self {
+                  Self { addr }
+              }
 
-            #(
-                pub async fn #rpc_ident(&mut self, #(#rpc_args_types),*) -> Result<#rpc_return_type, ()> {
-                    let req = #rpc_req_ident::#rpc_ident { #(#rpc_args),* };
-                    webcontr::prelude::SinkExt::feed(&mut self.transport, req).await;
-                    webcontr::prelude::SinkExt::flush(&mut self.transport).await;
+              #(
+                  pub async fn #rpc_ident(&mut self, #(#rpc_args_types),*) -> Result<#rpc_return_type, webcontr::transport::tcp::frame::ResponseErrorKind> {
+                      let stream = webcontr::prelude::TcpStream::connect(&self.addr).await.unwrap();
+                      let mut transport = webcontr::transport::tcp::request_transport(stream);
 
-                    let response = match webcontr::prelude::StreamExt::next(&mut self.transport).await {
-                        Some(payload) => match payload.map_err(|_| ())? {
-                            #rpc_res_ident::#rpc_ident(response) => response,
-                            _ => unreachable!()
-                        },
-                        None => return Err(())
-                    };
-                    Ok(response)
-                }
-            )*
-        }
-    }
+                      let req = #rpc_req_ident::#rpc_ident { #(#rpc_args),* };
+                      let body = webcontr::prelude::bincode::serialize(&req).unwrap();
+
+                      let request_frame = webcontr::transport::tcp::frame::RequestFrame::new(
+                          stringify!(#ident).to_string(),
+                          webcontr::prelude::Bytes::from(body)
+                      );
+
+                      webcontr::prelude::SinkExt::send(&mut transport, request_frame).await.unwrap();
+
+                      let stream = transport.into_inner();
+                      let mut transport = webcontr::transport::tcp::response_transport(stream);
+
+                      let response_frame = webcontr::prelude::StreamExt::next(&mut transport).await.unwrap().unwrap();
+
+                      let thing: #rpc_res_ident = match response_frame {
+                          webcontr::transport::tcp::frame::ResponseFrame::Error(err) => return Err(err),
+                          webcontr::transport::tcp::frame::ResponseFrame::Payload(data) => bincode::deserialize(&data).unwrap(),
+                      };
+
+
+
+                      match thing {
+                          #rpc_res_ident::#rpc_ident(response) => Ok(response),
+                          _ => unreachable!()
+                      }
+                  }
+              )*
+    //async fn hello(&mut self, value: String, value1: String) -> String {
+    //  let stream = TcpStream::connect(&self.addr).await.unwrap();
+    //  let mut transport = tcp::request_transport(stream);
+    //
+    //  let req = PingCommandRequest::hello { value, value1 };
+    //
+    //  let body = bincode::serialize(&req).unwrap();
+    //
+    //  transport
+    //    .send(RequestFrame::new("PingCommand".to_string(), Bytes::from(body)))
+    //    .await
+    //    .unwrap();
+    //
+    //  let stream = transport.into_inner();
+    //
+    //  let mut transport = tcp::response_transport(stream);
+    //
+    //  let response_frame = transport.next().await.unwrap().unwrap();
+    //
+    //  let thing: PingCommandResponse = match response_frame {
+    //    ResponseFrame::Error(err) => match err {
+    //      ResponseErrorKind::MethodNotFound => {
+    //        panic!("webcontr error: Command not found :(")
+    //      }
+    //      ResponseErrorKind::InvalidRequest => panic!("webcontr error: whaat"),
+    //    },
+    //  };
+    //  match thing {
+    //    PingCommandResponse::hello(res) => res,
+    //    _ => unreachable!(),
+    //  }
+    //}
+          }
+      }
   }
 }
 
 impl ToTokens for ServiceGenerator {
   fn to_tokens(&self, tokens: &mut TokenStream2) {
     tokens.extend([
-      self.trait_service(),
-      self.serve_fn(),
       self.service_response.to_token_stream(),
       self.service_request.to_token_stream(),
+      self.trait_service(),
+      self.impl_serve_fn(),
+      self.impl_servicename_fn(),
       self.service_client(),
     ]);
   }
