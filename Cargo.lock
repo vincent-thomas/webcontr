@@ -124,12 +124,7 @@ checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
 name = "internal-testing"
 version = "0.1.0"
 dependencies = [
- "bincode",
- "bytes",
- "futures-util",
- "pin-project-lite",
  "tokio",
- "tokio-util",
  "webcontr",
 ]
 
@@ -250,6 +245,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "static_assertions"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
 name = "syn"
 version = "2.0.96"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -341,6 +342,7 @@ dependencies = [
  "bytes",
  "futures-util",
  "serde",
+ "static_assertions",
  "thiserror",
  "tokio",
  "tokio-util",

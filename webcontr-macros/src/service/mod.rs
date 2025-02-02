@@ -1,10 +1,8 @@
-use proc_macro2::TokenStream as TokenStream2;
-use quote::{quote, ToTokens};
+use rpc::Rpc;
 use syn::{braced, parse::Parse, Attribute, Ident, Token, Visibility};
 
-use crate::Rpc;
-
 pub mod res_req;
+pub mod rpc;
 
 #[derive(Debug)]
 pub struct Service {

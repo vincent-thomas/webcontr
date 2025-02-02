@@ -213,7 +213,7 @@ pub fn request_encoding() {
 pub fn response_decoding() {
   let mut buffer_vec = Vec::default();
 
-  buffer_vec.extend(1u8.to_be_bytes());
+  buffer_vec.extend(0u8.to_be_bytes());
   buffer_vec.extend(4u16.to_be_bytes());
   buffer_vec.extend(b"data");
 
@@ -227,7 +227,7 @@ pub fn response_decoding() {
 
   let mut buffer_vec = Vec::default();
 
-  buffer_vec.extend(0u8.to_be_bytes());
+  buffer_vec.extend(1u8.to_be_bytes());
 
   let mut buffer_mut = BytesMut::from(buffer_vec.as_slice());
   let result = ResponseFrameCodec.decode(&mut buffer_mut);
@@ -248,7 +248,7 @@ pub fn response_encoding() {
 
   let mut buffer_vec = Vec::default();
 
-  buffer_vec.push(0u8);
+  buffer_vec.push(1u8);
 
   assert_eq!(bytes, BytesMut::from(buffer_vec.as_slice()));
 
@@ -262,7 +262,7 @@ pub fn response_encoding() {
 
   let mut buffer_vec = Vec::default();
 
-  buffer_vec.push(1u8);
+  buffer_vec.push(0u8);
   buffer_vec.extend((data2.len() as u16).to_be_bytes());
   buffer_vec.extend(data2.as_bytes());
 

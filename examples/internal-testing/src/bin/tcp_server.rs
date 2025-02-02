@@ -1,6 +1,6 @@
 use std::io;
 
-use internal_testing::{PingCommand, TestingCommand};
+use internal_testing::{PingCommand, Request, TestingCommand};
 use tokio::net::TcpListener;
 use webcontr::Server;
 
@@ -8,12 +8,12 @@ struct PingServer;
 
 #[webcontr::async_trait]
 impl PingCommand for PingServer {
-  async fn hello(&self, value: String, value1: String) -> String {
-    format!("{value}+{value1}")
+  async fn hello(&self) -> Vec<String> {
+    Vec::from_iter(["very nice".into(), "arry".into()])
   }
 
-  async fn hello2(&self, value: u8) -> String {
-    format!("Hello: {}", value)
+  async fn hello2(&self, req: Request) -> String {
+    req.tewting
   }
 }
 struct TestingServer;
@@ -32,6 +32,5 @@ async fn main() -> io::Result<()> {
     .add_service(TestingServer.into_serve());
 
   let tcp = TcpListener::bind("0.0.0.0:4000").await?;
-
   server.serve(tcp).await
 }

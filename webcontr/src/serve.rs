@@ -5,19 +5,24 @@ use std::{
 };
 
 use futures_util::{SinkExt, StreamExt};
-use tokio::net::TcpListener;
+use tokio::{
+  net::TcpListener,
+  task,
+  time::{timeout, Duration},
+};
 
 use crate::{
-  transport::tcp::{
-    self,
+  transport::{
     frame::{ResponseErrorKind, ResponseFrame},
+    tcp,
   },
-  ServeError, Server,
+  FrozenServer, ServeError,
 };
 
 pub struct ServerServe {
-  pub(crate) server: Server,
+  pub(crate) server: FrozenServer,
   pub(crate) listener: TcpListener,
+  pub(crate) timeout: Duration,
 }
 
 impl IntoFuture for ServerServe {
@@ -30,42 +35,50 @@ impl IntoFuture for ServerServe {
       loop {
         let (stream, _) = self.listener.accept().await?;
 
-        let mut transport = tcp::request_transport(stream);
+        let (read, mut write) = stream.into_split();
 
-        let Some(Ok(value)) = transport.next().await else {
-          continue;
-        };
-        let mut transport = tcp::response_transport(transport.into_inner());
+        let server = self.server.clone();
+        task::spawn(timeout(self.timeout, async move {
+          let mut transport = tcp::request_transport(read);
 
-        let key = value.command.as_str();
+          while let Some(value) = transport.next().await {
+            let mut transport = tcp::response_transport(&mut write);
 
-        match self.server.hash.get(key) {
-          Some(service) => {
-            match service.serve(value.arguments).await {
-              Ok(value) => {
-                transport.send(ResponseFrame::Payload(value)).await.unwrap()
-              }
-              Err(err) => {
-                let err = match err {
-                  ServeError::MethodNotFound => {
-                    ResponseErrorKind::MethodNotFound
+            let value = match value {
+              Ok(value) => value,
+              Err(_) => break,
+            };
+
+            let key = value.command.as_str();
+
+            match server.query(key) {
+              Some(service) => {
+                match service.serve(value.arguments).await {
+                  Ok(value) => {
+                    transport.send(ResponseFrame::Payload(value)).await.unwrap()
                   }
-                  ServeError::InvalidRequest => {
-                    ResponseErrorKind::InvalidRequest
+                  Err(err) => {
+                    let err = match err {
+                      ServeError::MethodNotFound => {
+                        ResponseErrorKind::MethodNotFound
+                      }
+                      ServeError::InvalidRequest => {
+                        ResponseErrorKind::InvalidRequest
+                      }
+                    };
+                    transport.send(ResponseFrame::Error(err)).await.unwrap()
                   }
                 };
-                transport.send(ResponseFrame::Error(err)).await.unwrap()
+              }
+              _ => {
+                transport
+                  .send(ResponseFrame::Error(ResponseErrorKind::MethodNotFound))
+                  .await
+                  .unwrap();
               }
             };
           }
-          _ => {
-            transport
-              .send(ResponseFrame::Error(ResponseErrorKind::MethodNotFound))
-              .await
-              .unwrap();
-            continue;
-          }
-        };
+        }));
       }
     })
   }
