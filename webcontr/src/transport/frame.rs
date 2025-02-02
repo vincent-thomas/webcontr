@@ -1,3 +1,5 @@
+#![allow(clippy::len_zero)]
+
 use std::io::{self, ErrorKind};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};

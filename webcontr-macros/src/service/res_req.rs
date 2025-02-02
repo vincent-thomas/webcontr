@@ -17,7 +17,7 @@ impl ServiceResponse {
   ) -> Self {
     Self {
       vis,
-      ident: Ident::new(&format!("{}Response", name.to_string()), name.span()),
+      ident: Ident::new(&format!("{}Response", name), name.span()),
       rpcs,
     }
   }
@@ -64,7 +64,7 @@ impl ServiceRequest {
   ) -> Self {
     Self {
       vis,
-      ident: Ident::new(&format!("{}Request", name.to_string()), name.span()),
+      ident: Ident::new(&format!("{}Request", name), name.span()),
       args,
     }
   }

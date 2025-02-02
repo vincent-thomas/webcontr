@@ -19,7 +19,7 @@ impl From<Server> for FrozenServer {
 }
 
 impl FrozenServer {
-  pub(crate) fn query(&self, cmd: &str) -> Option<&Box<dyn Serve>> {
+  pub(crate) fn query(&self, cmd: &str) -> Option<&dyn Serve> {
     self.inner.query(cmd)
   }
 }
@@ -44,7 +44,7 @@ impl Server {
     }
   }
 
-  pub(crate) fn query(&self, cmd: &str) -> Option<&Box<dyn Serve>> {
-    self.hash.get(cmd)
+  pub(crate) fn query(&self, cmd: &str) -> Option<&dyn Serve> {
+    self.hash.get(cmd).map(|v| &**v)
   }
 }

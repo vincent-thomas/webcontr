@@ -1,4 +1,4 @@
-use proc_macro2::{Span, TokenStream as TokenStream2};
+use proc_macro2::TokenStream as TokenStream2;
 use quote::{quote, ToTokens};
 use syn::{
   parenthesized, parse::Parse, spanned::Spanned, Attribute, FnArg, Ident, Pat,
@@ -17,10 +17,7 @@ impl ToTokens for Rpc {
   fn to_tokens(&self, tokens: &mut TokenStream2) {
     let Self { attrs, ident, args, output } = self;
 
-    let args = args.iter().map(|pat| {
-      let fn_arg = FnArg::Typed(pat.clone());
-      fn_arg
-    });
+    let args = args.iter().map(|pat| FnArg::Typed(pat.clone()));
 
     let attrs_iter = attrs.iter();
 
@@ -59,7 +56,7 @@ impl Parse for Rpc {
             parsed_params.push(arg.clone());
           } else {
             return Err(syn::Error::new(
-              Span::from(arg.span()),
+              arg.span(),
               "Patterns are not supported inside a rpc method",
             ));
           }

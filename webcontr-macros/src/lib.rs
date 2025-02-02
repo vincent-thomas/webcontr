@@ -57,7 +57,7 @@ impl ServiceGenerator {
     let attrs_iter = attrs.iter();
 
     let serve_struct_ident = Ident::new(
-      &format!("{}Serve", self.service.ident.to_string()),
+      &format!("{}Serve", self.service.ident),
       self.service.ident.span(),
     );
 
@@ -92,7 +92,7 @@ impl ServiceGenerator {
     let res_ident = &self.service_response.ident;
 
     let serve_struct_ident = Ident::new(
-      &format!("{}Serve", self.service.ident.to_string()),
+      &format!("{}Serve", self.service.ident),
       self.service.ident.span(),
     );
     quote! {
@@ -124,7 +124,7 @@ impl ServiceGenerator {
   fn impl_servicename_fn(&self) -> TokenStream2 {
     let ident = &self.service.ident;
     let serve_struct_ident = Ident::new(
-      &format!("{}Serve", self.service.ident.to_string()),
+      &format!("{}Serve", self.service.ident),
       self.service.ident.span(),
     );
 
@@ -140,7 +140,7 @@ impl ServiceGenerator {
   fn service_client(&self) -> TokenStream2 {
     let ident = &self.service.ident;
     let client_ident = Ident::new(
-      &format!("{}Client", self.service.ident.to_string()),
+      &format!("{}Client", self.service.ident),
       self.service.ident.span(),
     );
 
