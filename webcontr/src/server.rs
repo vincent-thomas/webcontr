@@ -1,5 +1,5 @@
 use crate::{serve::ServerServe, Serve, ServiceName};
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc};
 use tokio::net::TcpListener;
 
 #[derive(Default)]
@@ -40,7 +40,7 @@ impl Server {
     ServerServe {
       server: FrozenServer::from(self),
       listener: tcp_listener,
-      timeout: Duration::from_millis(500),
+      timeout: None,
     }
   }
 

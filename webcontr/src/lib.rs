@@ -14,7 +14,7 @@ pub use webcontr_macros::service;
 
 #[async_trait]
 pub trait Serve: Send + Sync {
-  async fn serve(&self, req: Bytes) -> Result<Bytes, ServeError>;
+  async fn serve(&self, req: Bytes) -> Result<Bytes, ResponseErrorKind>;
 }
 
 pub trait ServiceName {
@@ -34,10 +34,4 @@ pub enum ClientError {
   ServerError(ResponseErrorKind),
   #[error("encoding error: {0}")]
   EncodingError(Box<bincode::ErrorKind>),
-}
-
-#[derive(Debug)]
-pub enum ServeError {
-  MethodNotFound,
-  InvalidRequest,
 }

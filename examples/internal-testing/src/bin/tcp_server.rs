@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, time::Duration};
 
 use internal_testing::{PingCommand, Request, TestingCommand};
 use tokio::net::TcpListener;
@@ -8,7 +8,8 @@ struct PingServer;
 
 #[webcontr::async_trait]
 impl PingCommand for PingServer {
-  async fn hello(&self) -> Vec<String> {
+  async fn hello(&self, _: String) -> Vec<String> {
+    tokio::time::sleep(Duration::from_secs(4)).await;
     Vec::from_iter(["very nice".into(), "arry".into()])
   }
 
@@ -21,6 +22,7 @@ struct TestingServer;
 #[webcontr::async_trait]
 impl TestingCommand for TestingServer {
   async fn ping(&self) -> bool {
+    tokio::time::sleep(Duration::from_secs(4)).await;
     true
   }
 }

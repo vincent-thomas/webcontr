@@ -1,20 +1,22 @@
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_util::codec::{FramedRead, FramedWrite};
+pub mod server {
+  use tokio::io::{AsyncRead, AsyncWrite};
+  use tokio_util::codec::{FramedRead, FramedWrite};
 
-use super::frame::{RequestFrameCodec, ResponseFrameCodec};
+  use super::super::frame::{RequestFrameCodec, ResponseFrameCodec};
 
-pub fn request_transport<T>(io: T) -> FramedRead<T, RequestFrameCodec>
-where
-  T: AsyncRead,
-{
-  FramedRead::new(io, RequestFrameCodec)
-}
+  pub fn request_transport<T>(io: T) -> FramedRead<T, RequestFrameCodec>
+  where
+    T: AsyncRead,
+  {
+    FramedRead::new(io, RequestFrameCodec)
+  }
 
-pub fn response_transport<T>(io: T) -> FramedWrite<T, ResponseFrameCodec>
-where
-  T: AsyncWrite,
-{
-  FramedWrite::new(io, ResponseFrameCodec)
+  pub fn response_transport<T>(io: T) -> FramedWrite<T, ResponseFrameCodec>
+  where
+    T: AsyncWrite,
+  {
+    FramedWrite::new(io, ResponseFrameCodec)
+  }
 }
 
 pub mod client {
@@ -36,6 +38,52 @@ pub mod client {
   {
     FramedRead::new(io, ResponseFrameCodec)
   }
+
+  use bytes::Bytes;
+  use futures_util::{SinkExt, StreamExt};
+  use serde::{de::DeserializeOwned, Serialize};
+  use tokio::net::TcpStream;
+
+  use crate::{
+    transport::frame::{RequestFrame, ResponseFrame},
+    ClientError,
+  };
+
+  pub async fn send_client_req<Req: Serialize, Res: DeserializeOwned>(
+    cmd: &'static str,
+    req: Req,
+    mut stream: TcpStream,
+  ) -> Result<Res, ClientError> {
+    let (read, write) = stream.split();
+    let body = bincode::serialize(&req)
+      .map_err(|err| ClientError::EncodingError(err))?;
+
+    let request_frame = RequestFrame::new(cmd.to_string(), Bytes::from(body));
+    let mut transport = request_transport(write);
+    SinkExt::send(&mut transport, request_frame).await.unwrap();
+
+    let mut transport = response_transport(read);
+
+    let response_frame_outer;
+
+    loop {
+      let response_frame_in = StreamExt::next(&mut transport).await;
+      match response_frame_in {
+        None => continue,
+        Some(v) => {
+          response_frame_outer = v.map_err(|err| ClientError::IoError(err))?;
+          break;
+        }
+      }
+    }
+
+    let thing: Res = match response_frame_outer {
+      ResponseFrame::Error(err) => return Err(ClientError::ServerError(err)),
+      ResponseFrame::Payload(data) => bincode::deserialize(&data).unwrap(),
+    };
+
+    Ok(thing)
+  }
 }
 
 #[cfg(test)]
@@ -49,14 +97,7 @@ mod tests {
   use tokio::io::duplex;
   use tokio_util::codec::{FramedRead, FramedWrite};
   // Import the functions under test.
-  use super::{
-    client::{
-      request_transport as client_request_transport,
-      response_transport as client_response_transport,
-    },
-    request_transport as server_request_transport,
-    response_transport as server_response_transport,
-  };
+  use super::{client, server};
 
   // These tests assume that RequestFrameCodec and ResponseFrameCodec encode/decode
   // a String. Adjust the test values and types if your codecs work with a different type.
@@ -66,7 +107,7 @@ mod tests {
     // Simulate a duplex connection.
     let (client_io, server_io) = duplex(64);
     // Server uses a FramedRead to receive requests.
-    let mut server_reader = server_request_transport(server_io);
+    let mut server_reader = server::request_transport(server_io);
     // Client uses a FramedWrite with the same codec to send a request.
     let mut client_writer = FramedWrite::new(client_io, RequestFrameCodec);
 
@@ -82,7 +123,7 @@ mod tests {
   #[tokio::test]
   async fn test_server_response_transport() {
     let (server_io, client_io) = tokio::io::duplex(64);
-    let mut server_writer = server_response_transport(server_io);
+    let mut server_writer = server::response_transport(server_io);
     let mut client_reader =
       tokio_util::codec::FramedRead::new(client_io, ResponseFrameCodec);
 
@@ -100,7 +141,7 @@ mod tests {
     // Create a duplex connection.
     let (server_io, client_io) = duplex(64);
     // Client uses a FramedWrite to send requests.
-    let mut client_writer = client_request_transport(client_io);
+    let mut client_writer = client::request_transport(client_io);
     // Server manually sets up a FramedRead with the same codec to receive requests.
     let mut server_reader = FramedRead::new(server_io, RequestFrameCodec);
 
@@ -120,7 +161,7 @@ mod tests {
     // Server uses a FramedWrite to send responses.
     let mut server_writer = FramedWrite::new(server_io, ResponseFrameCodec);
     // Client uses a FramedRead to receive responses.
-    let mut client_reader = client_response_transport(client_io);
+    let mut client_reader = client::response_transport(client_io);
 
     let response = ResponseFrame::Payload(Bytes::from("hello"));
     server_writer.send(response.clone()).await.unwrap();

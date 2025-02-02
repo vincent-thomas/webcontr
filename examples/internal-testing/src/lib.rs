@@ -10,7 +10,7 @@ pub struct Request {
 #[webcontr::service]
 pub trait PingCommand {
   /// testing
-  async fn hello() -> Vec<String>;
+  async fn hello(nice: String) -> Vec<String>;
   async fn hello2(req: Request) -> String;
 }
 

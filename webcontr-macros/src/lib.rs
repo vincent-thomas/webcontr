@@ -102,18 +102,16 @@ impl ServiceGenerator {
 
         #[webcontr::async_trait]
         impl<A: #ident + Send + Sync> webcontr::Serve for #serve_struct_ident<A> {
-           async fn serve(&self, req: webcontr::prelude::Bytes) -> Result<webcontr::prelude::Bytes, webcontr::ServeError> {
-               println!("server request: {:?}", &req);
-               let req: #req_ident = webcontr::prelude::bincode::deserialize(&req).map_err(|_| webcontr::ServeError::InvalidRequest)?;
+           async fn serve(&self, req: webcontr::prelude::Bytes) -> Result<webcontr::prelude::Bytes, webcontr::transport::frame::ResponseErrorKind> {
+               let req: #req_ident = webcontr::prelude::bincode::deserialize(&req).map_err(|_| webcontr::transport::frame::ResponseErrorKind::InvalidRequest)?;
                match req {
                    #(
-                    #req_ident::#variants { #(#rpcs_args),* } => {
-                        let out = #ident::#variants(&self.service, #(#rpcs_args),*).await;
-                        let bytes_vec = webcontr::prelude::bincode::serialize(&#res_ident::#variants(out)).unwrap();
-                        let bytes = webcontr::prelude::Bytes::from(bytes_vec);
-                        println!("server response: {:?}", &bytes);
-                        Ok(bytes)
-                    }
+                        #req_ident::#variants { #(#rpcs_args),* } => {
+                            let out = #ident::#variants(&self.service, #(#rpcs_args),*).await;
+                            let bytes_vec = webcontr::prelude::bincode::serialize(&#res_ident::#variants(out)).unwrap();
+                            let bytes = webcontr::prelude::Bytes::from(bytes_vec);
+                            Ok(bytes)
+                        }
                     ),*
                }
            }
@@ -139,11 +137,13 @@ impl ServiceGenerator {
 
   fn service_client(&self) -> TokenStream2 {
     let ident = &self.service.ident;
+
     let client_ident = Ident::new(
       &format!("{}Client", self.service.ident),
       self.service.ident.span(),
     );
 
+    let rpc_attrs = self.service.rpcs.iter().map(|rpc| rpc.attrs.clone());
     let rpc_ident = self.service.rpcs.iter().map(|rpc| rpc.ident.clone());
 
     let rpc_args_types: Vec<Vec<PatType>> =
@@ -179,34 +179,14 @@ impl ServiceGenerator {
             }
 
             #(
+                #(#rpc_attrs)*
                 pub async fn #rpc_ident(&mut self, #(#rpc_args_types),*) -> Result<#rpc_return_type, webcontr::ClientError> {
                     let stream = webcontr::prelude::TcpStream::connect(&self.addr).await.map_err(|err| webcontr::ClientError::IoError(err))?;
-                    let (read, mut write) = stream.into_split();
-                    let mut transport = webcontr::transport::tcp::client::request_transport(write);
 
                     let req = #rpc_req_ident::#rpc_ident { #(#rpc_args),* };
-                    let body = webcontr::prelude::bincode::serialize(&req).map_err(|err| webcontr::ClientError::EncodingError(err))?;
+                    let res: #rpc_res_ident = webcontr::transport::tcp::client::send_client_req(stringify!(#ident), req, stream).await?;
 
-                    let request_frame = webcontr::transport::frame::RequestFrame::new(
-                        stringify!(#ident).to_string(),
-                        webcontr::prelude::Bytes::from(body)
-                    );
-
-                    webcontr::prelude::SinkExt::send(&mut transport, request_frame).await.unwrap();
-
-                    let stream = transport.into_inner();
-                    let mut transport = webcontr::transport::tcp::client::response_transport(read);
-
-                    let response_frame = webcontr::prelude::StreamExt::next(&mut transport).await.unwrap().unwrap();
-
-                    let thing: #rpc_res_ident = match response_frame {
-                        webcontr::transport::frame::ResponseFrame::Error(err) => return Err(webcontr::ClientError::ServerError(err)),
-                        webcontr::transport::frame::ResponseFrame::Payload(data) => webcontr::prelude::bincode::deserialize(&data).unwrap(),
-                    };
-
-
-
-                    match thing {
+                    match res {
                         #rpc_res_ident::#rpc_ident(response) => Ok(response),
                         _ => unreachable!()
                     }

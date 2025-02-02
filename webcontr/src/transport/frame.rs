@@ -18,6 +18,8 @@ pub enum ResponseErrorKind {
   MethodNotFound, // 1
   #[error("invalid request")]
   InvalidRequest, // 2
+  #[error("timeout")]
+  Timeout, // 3
 }
 
 impl ResponseFrame {
@@ -64,6 +66,8 @@ impl Decoder for ResponseFrameCodec {
       1 => Ok(Some(ResponseFrame::Error(ResponseErrorKind::MethodNotFound))),
       // Scenario 2: Totally unreadable/invalid request.
       2 => Ok(Some(ResponseFrame::Error(ResponseErrorKind::InvalidRequest))),
+      // Scenario 3: Server timeout
+      3 => Ok(Some(ResponseFrame::Error(ResponseErrorKind::Timeout))),
       _ => Err(io::Error::new(ErrorKind::InvalidData, "Invalid first byte")),
     }
   }
@@ -81,6 +85,7 @@ impl Encoder<ResponseFrame> for ResponseFrameCodec {
       ResponseFrame::Error(err) => match err {
         ResponseErrorKind::MethodNotFound => dst.put_u8(1),
         ResponseErrorKind::InvalidRequest => dst.put_u8(2),
+        ResponseErrorKind::Timeout => dst.put_u8(3),
       },
       ResponseFrame::Payload(payload) => {
         dst.put_u8(0);
