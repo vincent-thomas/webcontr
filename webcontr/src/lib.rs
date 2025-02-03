@@ -4,6 +4,9 @@ mod server;
 pub mod transport;
 use std::io;
 
+#[cfg(feature = "tls")]
+pub mod tls;
+
 pub use server::*;
 
 pub use async_trait::async_trait;

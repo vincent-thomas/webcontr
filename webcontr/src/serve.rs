@@ -1,28 +1,30 @@
 use std::{
-  future::{Future, IntoFuture}, io, pin::Pin, task::{Context, Poll}
+  future::{Future, IntoFuture}, io, pin::Pin, sync::Arc, task::{Context, Poll}
 };
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::{
   net::TcpListener,
   sync::watch,
-  task,
   time::{sleep, Duration, Instant, Sleep},
 };
 use tokio_util::task::TaskTracker;
+use tower::Service;
 
 use crate::{
   transport::{
     frame::{ResponseErrorKind, ResponseFrame},
     tcp,
-  },
-  FrozenServer,
+  }, FrozenServer
 };
 
 pub struct ServerServe {
   pub(crate) server: FrozenServer,
   pub(crate) listener: TcpListener,
   pub(crate) timeout: Option<Duration>,
+
+  #[cfg(feature = "tls")]
+  pub(crate) tls_paths: crate::tls::TLSPaths,
 }
 
 impl ServerServe {
@@ -48,10 +50,16 @@ impl IntoFuture for ServerServe {
       eprintln!("Received Ctrl+C signal");
     });
 
+    #[cfg(feature = "tls")]
+    let acceptor = {
+      let config = self.tls_paths.clone().serverconfig_from_paths();
+      tokio_rustls::TlsAcceptor::from(Arc::new(config))
+    };
+
     Box::pin(async move {
       loop {
-        let stream = tokio::select! {
-            listener = self.listener.accept() => listener.map(|s| s.0)?,
+        let (stream, _) = tokio::select! {
+            listener = self.listener.accept() => listener?,
             _ = shutdown_rx.changed() => {
                 task_tracker.close();
                 task_tracker.wait().await;
@@ -59,24 +67,35 @@ impl IntoFuture for ServerServe {
             },
         };
 
-        let (read, mut write) = stream.into_split();
+        let mut server = self.server.clone();
 
-        let server = self.server.clone();
+        #[cfg(feature = "tls")]
+        let acceptor = acceptor.clone();
+
         task_tracker.spawn(async move {
-          let mut transport = tcp::server::request_transport(read);
-          loop {
-            let value = match transport.next().await {
-              Some(value) => match value {
-                Ok(value) => value,
-                Err(_) => return,
-              },
-              None => return,
-            };
-            let mut transport = tcp::server::response_transport(&mut write);
+           let stream = {
+             #[cfg(feature = "tls")] { acceptor.accept(stream).await.unwrap() }
+             #[cfg(not(feature = "tls"))] { stream }
+           };
+           let mut transport = tcp::request_transport(stream);
+          
+            let value;
+            loop {
+              value = match transport.next().await {
+                Some(value) => match value {
+                  Ok(value) => value,
+                  Err(_) => return,
+                },
+                None => continue,
+              };
+              break;
+            }
+            let mut transport = tcp::response_transport(transport.into_inner());
 
             match server.query(value.command.as_str()) {
-              Some(service) => {
-                match ServeTaskFuture::new(self.timeout, service.serve(value.arguments)).await 
+              Some(service_ref) => {
+                  let mut service = service_ref.clone();
+                match ServeTaskFuture::new(self.timeout, service.call(value.arguments)).await 
                 {
                     Ok(value) => match value {
                         Ok(bytes) => transport.send(ResponseFrame::Payload(bytes)).await.expect("webcontr internal error: failed to send ResponseFrame::Payload"),
@@ -92,7 +111,6 @@ impl IntoFuture for ServerServe {
                   .expect("webcontr internal error: failed to send ResponseFrame::Error(ResponseErrorKind::MethodNotFound)");
               }
             };
-          }
         });
       }
     })
@@ -109,6 +127,9 @@ pin_project_lite::pin_project! {
     }
 }
 
+//#[cfg(test)]
+//static_assertions::assert_impl_all!(ServeTaskFuture<_>: Send);
+
 impl<F> ServeTaskFuture<F> {
   pub fn new(duration: Option<Duration>, future: F) -> Self {
     ServeTaskFuture {
@@ -120,7 +141,7 @@ impl<F> ServeTaskFuture<F> {
   }
 }
 
-impl<F: Future> Future for ServeTaskFuture<F> {
+impl<F: Send + Future> Future for ServeTaskFuture<F> {
   type Output = Result<F::Output, ()>;
 
   fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

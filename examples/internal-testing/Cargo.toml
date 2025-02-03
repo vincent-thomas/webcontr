@@ -5,4 +5,5 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1.43.0", features = ["rt", "rt-multi-thread", "macros"] }
-webcontr.path = "../../webcontr"
+webcontr = { path = "../../webcontr", features = ["tls"] }
+tower = { version = "0.5.2", features = ["util", "limit"] }

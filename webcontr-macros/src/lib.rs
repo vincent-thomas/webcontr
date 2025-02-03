@@ -60,11 +60,10 @@ impl ServiceGenerator {
       &format!("{}Serve", self.service.ident),
       self.service.ident.span(),
     );
-
     quote! {
        #(#attrs_iter),*
        #[webcontr::async_trait]
-       #vis trait #ident: Sized {
+       #vis trait #ident: Sized + Clone {
            #(#rpcs_iter)*
 
            fn into_serve(self) -> #serve_struct_ident<Self> {
@@ -96,26 +95,95 @@ impl ServiceGenerator {
       self.service.ident.span(),
     );
     quote! {
-        #vis struct #serve_struct_ident<S> {
-            service: S
+        #[derive(Clone)]
+        #vis struct #serve_struct_ident<S: Clone> {
+            pub service: S
         }
 
-        #[webcontr::async_trait]
-        impl<A: #ident + Send + Sync> webcontr::Serve for #serve_struct_ident<A> {
-           async fn serve(&self, req: webcontr::prelude::Bytes) -> Result<webcontr::prelude::Bytes, webcontr::transport::frame::ResponseErrorKind> {
-               let req: #req_ident = webcontr::prelude::bincode::deserialize(&req).map_err(|_| webcontr::transport::frame::ResponseErrorKind::InvalidRequest)?;
-               match req {
-                   #(
-                        #req_ident::#variants { #(#rpcs_args),* } => {
-                            let out = #ident::#variants(&self.service, #(#rpcs_args),*).await;
-                            let bytes_vec = webcontr::prelude::bincode::serialize(&#res_ident::#variants(out)).unwrap();
-                            let bytes = webcontr::prelude::Bytes::from(bytes_vec);
-                            Ok(bytes)
-                        }
-                    ),*
-               }
-           }
+        //impl<A: #ident + Send + Sync> webcontr::prelude::Service<webcontr::prelude::Bytes> for #serve_struct_ident<A> {
+        //  type Response = webcontr::prelude::Bytes;
+        //  type Error = webcontr::transport::frame::ResponseErrorKind;
+        //  type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>>>>;
+        //
+        //  fn poll_ready(&mut self, cx: &mut core::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+        //      std::task::Poll::Ready(Ok(()))
+        //  }
+        //
+        //  fn call(&mut self, req: webcontr::prelude::Bytes) -> Self::Future {
+        //
+        //      let req: #req_ident = match webcontr::prelude::bincode::deserialize(&req).map_err(|_| webcontr::transport::frame::ResponseErrorKind::InvalidRequest) {
+        //          Ok(value) => value,
+        //          Err(err) => return Box::pin(std::future::ready(Err(err)))
+        //      };
+        //      match req {
+        //        #(
+        //           #req_ident::#variants { #(#rpcs_args),* } => {
+        //             Box::pin(webcontr::prelude::FutureExt::map(
+        //               #ident::#variants(&self.service, #(#rpcs_args),*),
+        //               |out| {
+        //                 let bytes_vec = webcontr::prelude::bincode::serialize(&#res_ident::#variants(out)).unwrap();
+        //                 let bytes = webcontr::prelude::Bytes::from(bytes_vec);
+        //                 Ok(bytes)
+        //               }
+        //             ))
+        //           }
+        //        ),*
+        //      }}
+        //}
+
+        impl<A: #ident + Send + Clone + Sync + 'static> Service<Bytes>
+          for #serve_struct_ident<A>
+        {
+          type Response = Bytes;
+          type Error = webcontr::transport::frame::ResponseErrorKind;
+          type Future =
+            std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+          fn poll_ready(
+            &mut self,
+            _cx: &mut std::task::Context<'_>,
+          ) -> std::task::Poll<Result<(), Self::Error>> {
+            // Service is always ready
+            std::task::Poll::Ready(Ok(()))
+          }
+
+          fn call(&mut self, req: webcontr::prelude::Bytes) -> Self::Future {
+            let service = self.service.clone();
+
+            Box::pin(async move {
+              let req: #req_ident = bincode::deserialize(&req)
+                .map_err(|_| ResponseErrorKind::InvalidRequest)?;
+
+              match req {
+                #(
+                  #req_ident::#variants { #(#rpcs_args),* } => {
+                    let out = #ident::#variants(&service, #(#rpcs_args),*).await;
+                    let bytes_vec =
+                      bincode::serialize(&#res_ident::#variants(out)).unwrap();
+                    Ok(Bytes::from(bytes_vec))
+                  }
+                ),*
+              }
+            })
+          }
         }
+
+        //#[webcontr::async_trait]
+        //impl<A: #ident + Send + Sync> webcontr::Serve for #serve_struct_ident<A> {
+        //   async fn serve(&self, req: webcontr::prelude::Bytes) -> Result<webcontr::prelude::Bytes, webcontr::transport::frame::ResponseErrorKind> {
+        //       let req: #req_ident = webcontr::prelude::bincode::deserialize(&req).map_err(|_| webcontr::transport::frame::ResponseErrorKind::InvalidRequest)?;
+        //       match req {
+        //           #(
+        //                #req_ident::#variants { #(#rpcs_args),* } => {
+        //                    let out = #ident::#variants(&self.service, #(#rpcs_args),*).await;
+        //                    let bytes_vec = webcontr::prelude::bincode::serialize(&#res_ident::#variants(out)).unwrap();
+        //                    let bytes = webcontr::prelude::Bytes::from(bytes_vec);
+        //                    Ok(bytes)
+        //                }
+        //            ),*
+        //       }
+        //   }
+        //}
     }
   }
 
@@ -127,7 +195,7 @@ impl ServiceGenerator {
     );
 
     quote! {
-        impl<B> webcontr::ServiceName for #serve_struct_ident<B> {
+            impl<A: Clone> webcontr::ServiceName for #serve_struct_ident<A> {
             fn name(&self) -> &'static str {
                 stringify!(#ident)
             }
@@ -181,10 +249,9 @@ impl ServiceGenerator {
             #(
                 #(#rpc_attrs)*
                 pub async fn #rpc_ident(&mut self, #(#rpc_args_types),*) -> Result<#rpc_return_type, webcontr::ClientError> {
-                    let stream = webcontr::prelude::TcpStream::connect(&self.addr).await.map_err(|err| webcontr::ClientError::IoError(err))?;
 
                     let req = #rpc_req_ident::#rpc_ident { #(#rpc_args),* };
-                    let res: #rpc_res_ident = webcontr::transport::tcp::client::send_client_req(stringify!(#ident), req, stream).await?;
+                    let res: #rpc_res_ident = webcontr::transport::tcp::client::send_client_req(stringify!(#ident), req, &self.addr).await?;
 
                     match res {
                         #rpc_res_ident::#rpc_ident(response) => Ok(response),
