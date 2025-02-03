@@ -18,8 +18,6 @@ where
 }
 
 pub mod client {
-  use std::sync::Arc;
-
   use super::{request_transport, response_transport};
   use bytes::Bytes;
   use futures_util::{SinkExt, StreamExt};
@@ -45,6 +43,7 @@ pub mod client {
       }
       #[cfg(feature = "tls")]
       {
+        use std::sync::Arc;
         use tokio_rustls::{
           rustls::{
             pki_types::{pem::PemObject, CertificateDer, ServerName},
@@ -52,6 +51,7 @@ pub mod client {
           },
           TlsConnector,
         };
+
         const ROOT: &str = include_str!("../../../tests/certs/root.pem");
         let mut client_root_cert_store = RootCertStore::empty();
         for root in CertificateDer::pem_slice_iter(ROOT.as_bytes()) {
@@ -119,8 +119,6 @@ mod tests {
   use futures_util::{SinkExt, StreamExt};
   use tokio::io::duplex;
   use tokio_util::codec::{FramedRead, FramedWrite};
-  // Import the functions under test.
-  use super::client;
 
   // These tests assume that RequestFrameCodec and ResponseFrameCodec encode/decode
   // a String. Adjust the test values and types if your codecs work with a different type.

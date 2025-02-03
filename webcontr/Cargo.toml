@@ -3,6 +3,10 @@ name = "webcontr"
 version = "0.1.0"
 edition = "2021"
 
+[[bench]]
+name = "codec"
+harness = false
+
 [features]
 tls = ["dep:tokio-rustls", "dep:webpki-roots", "dep:rustls-pemfile"]
 default = []
@@ -25,5 +29,6 @@ rustls-pemfile = { version = "2.2.0", optional = true }
 tower = { version = "0.5.2", features = ["util"] }
 
 [dev-dependencies]
+criterion = "0.5.1"
 rcgen = "0.13.2"
 static_assertions = "1.1.0"

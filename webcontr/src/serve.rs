@@ -1,12 +1,16 @@
 use std::{
-  future::{Future, IntoFuture}, io, pin::Pin, sync::Arc, task::{Context, Poll}
+  future::{Future, IntoFuture},
+  io,
+  pin::Pin,
+  sync::Arc,
+  task::{Context, Poll},
 };
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::{
   net::TcpListener,
   sync::watch,
-  time::{sleep, Duration, Instant, Sleep},
+  time::{sleep, Duration, Sleep},
 };
 use tokio_util::task::TaskTracker;
 use tower::Service;
@@ -15,7 +19,8 @@ use crate::{
   transport::{
     frame::{ResponseErrorKind, ResponseFrame},
     tcp,
-  }, FrozenServer
+  },
+  FrozenServer,
 };
 
 pub struct ServerServe {
@@ -78,7 +83,6 @@ impl IntoFuture for ServerServe {
              #[cfg(not(feature = "tls"))] { stream }
            };
            let mut transport = tcp::request_transport(stream);
-          
             let value;
             loop {
               value = match transport.next().await {
@@ -95,14 +99,13 @@ impl IntoFuture for ServerServe {
             match server.query(value.command.as_str()) {
               Some(service_ref) => {
                   let mut service = service_ref.clone();
-                match ServeTaskFuture::new(self.timeout, service.call(value.arguments)).await 
-                {
+                  match ServeTaskFuture::new(self.timeout, service.call(value.arguments)).await {
                     Ok(value) => match value {
                         Ok(bytes) => transport.send(ResponseFrame::Payload(bytes)).await.expect("webcontr internal error: failed to send ResponseFrame::Payload"),
                         Err(err) => transport.send(ResponseFrame::Error(err)).await.expect("webcontr internal error: failed to send ResponseFrame::Error")
                     },
                     Err(()) => transport.send(ResponseFrame::Error(ResponseErrorKind::Timeout)).await.expect("webcontr internal error: failed to send ResponseFrame::Error(ResponseErrorKind::Timeout)"),
-                }
+                  }
               }
               _ => {
                 transport
@@ -117,26 +120,16 @@ impl IntoFuture for ServerServe {
   }
 }
 
-pin_project_lite::pin_project! {
-    pub struct ServeTaskFuture<F> {
-        #[pin]
-      future: F,
-      timeout: Option<Pin<Box<Sleep>>>,
-      start: Instant,
-      duration: Option<Duration>,
-    }
+pub struct ServeTaskFuture<F> {
+  future: Pin<Box<F>>,
+  timeout: Option<Pin<Box<Sleep>>>,
 }
-
-//#[cfg(test)]
-//static_assertions::assert_impl_all!(ServeTaskFuture<_>: Send);
 
 impl<F> ServeTaskFuture<F> {
   pub fn new(duration: Option<Duration>, future: F) -> Self {
     ServeTaskFuture {
-      future,
+      future: Box::pin(future),
       timeout: duration.map(|d| Box::pin(sleep(d))),
-      start: Instant::now(),
-      duration,
     }
   }
 }
@@ -144,16 +137,17 @@ impl<F> ServeTaskFuture<F> {
 impl<F: Send + Future> Future for ServeTaskFuture<F> {
   type Output = Result<F::Output, ()>;
 
-  fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-    let this = self.project();
-
-    if let Some(ref mut timeout) = this.timeout {
-      if timeout.as_mut().poll(cx).is_ready() {
+  fn poll(
+    mut self: Pin<&mut Self>,
+    cx: &mut Context<'_>,
+  ) -> Poll<Self::Output> {
+    if let Some(timeout) = &mut self.timeout {
+      if std::pin::pin!(timeout).as_mut().poll(cx).is_ready() {
         return Poll::Ready(Err(()));
       }
     }
 
-    match this.future.poll(cx) {
+    match self.future.as_mut().poll(cx) {
       Poll::Ready(val) => Poll::Ready(Ok(val)),
       Poll::Pending => Poll::Pending,
     }
