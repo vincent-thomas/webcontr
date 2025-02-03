@@ -3,6 +3,7 @@ pub mod serve;
 mod server;
 pub mod transport;
 use std::io;
+mod utils;
 
 #[cfg(feature = "tls")]
 pub mod tls;

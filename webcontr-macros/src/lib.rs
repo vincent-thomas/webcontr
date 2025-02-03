@@ -100,37 +100,6 @@ impl ServiceGenerator {
             pub service: S
         }
 
-        //impl<A: #ident + Send + Sync> webcontr::prelude::Service<webcontr::prelude::Bytes> for #serve_struct_ident<A> {
-        //  type Response = webcontr::prelude::Bytes;
-        //  type Error = webcontr::transport::frame::ResponseErrorKind;
-        //  type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>>>>;
-        //
-        //  fn poll_ready(&mut self, cx: &mut core::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
-        //      std::task::Poll::Ready(Ok(()))
-        //  }
-        //
-        //  fn call(&mut self, req: webcontr::prelude::Bytes) -> Self::Future {
-        //
-        //      let req: #req_ident = match webcontr::prelude::bincode::deserialize(&req).map_err(|_| webcontr::transport::frame::ResponseErrorKind::InvalidRequest) {
-        //          Ok(value) => value,
-        //          Err(err) => return Box::pin(std::future::ready(Err(err)))
-        //      };
-        //      match req {
-        //        #(
-        //           #req_ident::#variants { #(#rpcs_args),* } => {
-        //             Box::pin(webcontr::prelude::FutureExt::map(
-        //               #ident::#variants(&self.service, #(#rpcs_args),*),
-        //               |out| {
-        //                 let bytes_vec = webcontr::prelude::bincode::serialize(&#res_ident::#variants(out)).unwrap();
-        //                 let bytes = webcontr::prelude::Bytes::from(bytes_vec);
-        //                 Ok(bytes)
-        //               }
-        //             ))
-        //           }
-        //        ),*
-        //      }}
-        //}
-
         impl<A: #ident + Send + Clone + Sync + 'static> Service<Bytes>
           for #serve_struct_ident<A>
         {
@@ -167,23 +136,6 @@ impl ServiceGenerator {
             })
           }
         }
-
-        //#[webcontr::async_trait]
-        //impl<A: #ident + Send + Sync> webcontr::Serve for #serve_struct_ident<A> {
-        //   async fn serve(&self, req: webcontr::prelude::Bytes) -> Result<webcontr::prelude::Bytes, webcontr::transport::frame::ResponseErrorKind> {
-        //       let req: #req_ident = webcontr::prelude::bincode::deserialize(&req).map_err(|_| webcontr::transport::frame::ResponseErrorKind::InvalidRequest)?;
-        //       match req {
-        //           #(
-        //                #req_ident::#variants { #(#rpcs_args),* } => {
-        //                    let out = #ident::#variants(&self.service, #(#rpcs_args),*).await;
-        //                    let bytes_vec = webcontr::prelude::bincode::serialize(&#res_ident::#variants(out)).unwrap();
-        //                    let bytes = webcontr::prelude::Bytes::from(bytes_vec);
-        //                    Ok(bytes)
-        //                }
-        //            ),*
-        //       }
-        //   }
-        //}
     }
   }
 

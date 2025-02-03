@@ -84,9 +84,9 @@ impl IntoFuture for ServerServe {
               value = match transport.next().await {
                 Some(value) => match value {
                   Ok(value) => value,
-                  Err(_) => return,
+                  Err(_) => return, // Abort current request.
                 },
-                None => continue,
+                None => continue, // Not enough data, fetching more.
               };
               break;
             }
